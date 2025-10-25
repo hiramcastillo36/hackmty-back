@@ -1,0 +1,9 @@
+# NOTA: Este archivo está deprecado
+# Usa el docker-compose.yml en la raíz del proyecto
+#
+# Para ejecutar desde la raíz:
+# cd ..
+# docker-compose up --build
+#
+# O desde aquí con contexto correcto:
+# docker-compose -f ../docker-compose.yml up --build
