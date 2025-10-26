@@ -2,14 +2,17 @@ from django.db import models
 from rest_framework import serializers
 from drf_spectacular.utils import extend_schema_field
 from drf_spectacular.types import OpenApiTypes
-from .models import Trolley, TrolleyLevel, TrolleyItem, QRData
+from .models import (
+    Trolley, TrolleyLevel, Product, Specification, SpecificationItem,
+    QRData, TrolleyDrawer, SensorData
+)
 
 
-class TrolleyItemSerializer(serializers.ModelSerializer):
+class ProductSerializer(serializers.ModelSerializer):
     """
-    Serializer para artículos del trolley.
+    Serializer para productos del catálogo.
 
-    Permite crear y actualizar items con imágenes.
+    Permite crear y actualizar productos con imágenes.
     """
     # Especificar que 'image' es un archivo para Swagger
     image = serializers.ImageField(
@@ -19,14 +22,13 @@ class TrolleyItemSerializer(serializers.ModelSerializer):
     )
 
     class Meta:
-        model = TrolleyItem
+        model = Product
         fields = [
             'id',
-            'level',
             'name',
             'description',
             'sku',
-            'quantity',
+            'stock_quantity',
             'image',
             'price',
             'category',
@@ -47,8 +49,7 @@ class TrolleyItemSerializer(serializers.ModelSerializer):
 
 
 class TrolleyLevelSerializer(serializers.ModelSerializer):
-    """Serializer para los niveles del trolley con sus artículos"""
-    items = TrolleyItemSerializer(many=True, read_only=True)
+    """Serializer para los niveles del trolley"""
     level_display = serializers.SerializerMethodField()
 
     class Meta:
@@ -60,7 +61,6 @@ class TrolleyLevelSerializer(serializers.ModelSerializer):
             'level_display',
             'capacity',
             'description',
-            'items',
             'created_at',
             'updated_at',
         ]
@@ -72,9 +72,8 @@ class TrolleyLevelSerializer(serializers.ModelSerializer):
 
 
 class TrolleyDetailSerializer(serializers.ModelSerializer):
-    """Serializer detallado del trolley con todos sus niveles e items"""
+    """Serializer detallado del trolley con todos sus niveles"""
     levels = TrolleyLevelSerializer(many=True, read_only=True)
-    total_items = serializers.SerializerMethodField()
 
     class Meta:
         model = Trolley
@@ -84,20 +83,10 @@ class TrolleyDetailSerializer(serializers.ModelSerializer):
             'description',
             'airline',
             'levels',
-            'total_items',
             'created_at',
             'updated_at',
         ]
         read_only_fields = ['created_at', 'updated_at', 'id']
-
-    def get_total_items(self, obj):
-        """Cuenta el total de artículos en todos los niveles"""
-        total = 0
-        for level in obj.levels.all():
-            total += level.items.aggregate(
-                total_qty=models.Sum('quantity')
-            )['total_qty'] or 0
-        return total
 
 
 class TrolleyListSerializer(serializers.ModelSerializer):
@@ -157,6 +146,133 @@ class QRDataSerializer(serializers.ModelSerializer):
             'updated_at',
         ]
         read_only_fields = ['created_at', 'updated_at', 'id', 'trolleys']
+
+
+class TrolleyDrawerSerializer(serializers.ModelSerializer):
+    """Serializer para drawers del trolley"""
+    trolley_name = serializers.CharField(source='trolley.name', read_only=True)
+    level_display = serializers.CharField(source='level.get_level_number_display', read_only=True)
+
+    class Meta:
+        model = TrolleyDrawer
+        fields = [
+            'id',
+            'trolley',
+            'trolley_name',
+            'drawer_id',
+            'level',
+            'level_display',
+            'description',
+            'created_at',
+            'updated_at',
+        ]
+        read_only_fields = ['created_at', 'updated_at', 'id']
+
+
+class SensorDataSerializer(serializers.ModelSerializer):
+    """Serializer para datos de sensores"""
+    drawer_info = TrolleyDrawerSerializer(source='drawer', read_only=True)
+    trolley_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = SensorData
+        fields = [
+            'id',
+            'stream_id',
+            'timestamp',
+            'station_id',
+            'drawer',
+            'drawer_info',
+            'spec_id',
+            'sensor_type',
+            'expected_value',
+            'detected_value',
+            'deviation_score',
+            'alert_flag',
+            'operator_id',
+            'flight_number',
+            'customer_name',
+            'trolley_name',
+            'created_at',
+            'updated_at',
+        ]
+        read_only_fields = ['created_at', 'updated_at', 'id']
+
+    def get_trolley_name(self, obj):
+        """Obtiene el nombre del trolley si existe"""
+        if obj.drawer:
+            return obj.drawer.trolley.name
+        return None
+
+
+class SpecificationItemSerializer(serializers.ModelSerializer):
+    """Serializer para items de especificación"""
+    product_info = ProductSerializer(source='product', read_only=True)
+    drawer_info = TrolleyDrawerSerializer(source='drawer', read_only=True)
+
+    class Meta:
+        model = SpecificationItem
+        fields = [
+            'id',
+            'specification',
+            'drawer',
+            'drawer_info',
+            'product',
+            'product_info',
+            'required_quantity',
+        ]
+        read_only_fields = ['id']
+
+
+class SpecificationSerializer(serializers.ModelSerializer):
+    """Serializer para especificaciones (planes de carga)"""
+    items = SpecificationItemSerializer(many=True, read_only=True)
+    trolley_template_name = serializers.CharField(
+        source='trolley_template.name',
+        read_only=True
+    )
+
+    class Meta:
+        model = Specification
+        fields = [
+            'id',
+            'spec_id',
+            'name',
+            'description',
+            'trolley_template',
+            'trolley_template_name',
+            'items',
+            'created_at',
+            'updated_at',
+        ]
+        read_only_fields = ['created_at', 'updated_at', 'id']
+
+
+class SpecificationDetailSerializer(serializers.ModelSerializer):
+    """Serializer detallado para especificaciones con todos sus items"""
+    items = SpecificationItemSerializer(many=True, read_only=True)
+    trolley_info = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Specification
+        fields = [
+            'id',
+            'spec_id',
+            'name',
+            'description',
+            'trolley_template',
+            'trolley_info',
+            'items',
+            'created_at',
+            'updated_at',
+        ]
+        read_only_fields = ['created_at', 'updated_at', 'id']
+
+    def get_trolley_info(self, obj):
+        """Retorna información detallada del trolley template"""
+        if obj.trolley_template:
+            return TrolleyDetailSerializer(obj.trolley_template).data
+        return None
 
 
 

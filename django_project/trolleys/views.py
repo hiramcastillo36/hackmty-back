@@ -4,15 +4,25 @@ from rest_framework.response import Response
 from rest_framework.parsers import MultiPartParser, FormParser
 from django.shortcuts import get_object_or_404
 from drf_spectacular.utils import extend_schema, OpenApiRequest
+from django.db.models import Q
+from django.db import models
 
-from .models import Trolley, TrolleyLevel, TrolleyItem, QRData
+from .models import (
+    Trolley, TrolleyLevel, Product, Specification, SpecificationItem,
+    QRData, TrolleyDrawer, SensorData
+)
 from .serializers import (
     TrolleyListSerializer,
     TrolleyDetailSerializer,
     TrolleyCreateUpdateSerializer,
     TrolleyLevelSerializer,
-    TrolleyItemSerializer,
+    ProductSerializer,
+    SpecificationSerializer,
+    SpecificationDetailSerializer,
+    SpecificationItemSerializer,
     QRDataSerializer,
+    TrolleyDrawerSerializer,
+    SensorDataSerializer,
 )
 
 
@@ -21,7 +31,7 @@ class TrolleyViewSet(viewsets.ModelViewSet):
     API para gestionar trolleys (carros de servicio) de aerolínea.
 
     Permite crear, actualizar, listar y eliminar trolleys, así como gestionar
-    los niveles y artículos contenidos en cada trolley.
+    los niveles y drawers contenidos en cada trolley.
 
     ## Acciones disponibles:
 
@@ -51,7 +61,7 @@ class TrolleyViewSet(viewsets.ModelViewSet):
     }
     ```
     """
-    queryset = Trolley.objects.prefetch_related('levels__items')
+    queryset = Trolley.objects.prefetch_related('levels')
 
     def get_serializer_class(self):
         """Retorna el serializer apropriado según la acción"""
@@ -125,59 +135,38 @@ class TrolleyLevelViewSet(viewsets.ModelViewSet):
     - GET /levels/{id}/ - Obtener detalles de un nivel
     - PUT /levels/{id}/ - Actualizar un nivel
     - DELETE /levels/{id}/ - Eliminar un nivel
-    - GET /levels/{id}/items/ - Listar artículos de un nivel
-    - POST /levels/{id}/items/ - Agregar artículo a un nivel
     """
-    queryset = TrolleyLevel.objects.prefetch_related('items')
+    queryset = TrolleyLevel.objects.all()
     serializer_class = TrolleyLevelSerializer
 
-    @action(detail=True, methods=['get'], url_path='items')
-    def get_items(self, request, pk=None):
-        """Obtener todos los artículos de un nivel"""
-        level = self.get_object()
-        items = level.items.all()
-        serializer = TrolleyItemSerializer(items, many=True)
-        return Response(serializer.data)
 
-    @action(detail=True, methods=['post'], url_path='items')
-    def add_item(self, request, pk=None):
-        """Agregar un nuevo artículo a un nivel"""
-        level = self.get_object()
-        serializer = TrolleyItemSerializer(data=request.data)
-        if serializer.is_valid():
-            serializer.save(level=level)
-            return Response(serializer.data, status=status.HTTP_201_CREATED)
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
-
-class TrolleyItemViewSet(viewsets.ModelViewSet):
+class ProductViewSet(viewsets.ModelViewSet):
     """
-    API para gestionar artículos individuales en los trolleys.
+    API para gestionar productos del catálogo.
 
-    Permite crear, actualizar, listar, eliminar y buscar artículos.
+    Permite crear, actualizar, listar, eliminar y buscar productos.
     Incluye funcionalidades de búsqueda avanzada, filtrado y operaciones
-    de inventario como actualizar cantidad o disminuir stock.
+    de inventario como actualizar cantidad de stock.
 
     ## Acciones disponibles:
 
-    - **list**: `GET /api/items/` - Listar artículos (con filtros)
-    - **create**: `POST /api/items/` - Crear nuevo artículo (con imagen opcional)
-    - **retrieve**: `GET /api/items/{id}/` - Obtener detalles
-    - **update**: `PUT /api/items/{id}/` - Actualizar artículo
-    - **partial_update**: `PATCH /api/items/{id}/` - Actualización parcial
-    - **destroy**: `DELETE /api/items/{id}/` - Eliminar artículo
-    - **by_sku**: `GET /api/items/sku/{sku}/` - Buscar por SKU exacto
-    - **search_items**: `GET /api/items/search/?query=term` - Búsqueda general
-    - **update_quantity**: `POST /api/items/{id}/update-quantity/` - Actualizar cantidad
-    - **decrease_quantity**: `POST /api/items/{id}/decrease-quantity/` - Disminuir stock
+    - **list**: `GET /api/products/` - Listar productos (con filtros)
+    - **create**: `POST /api/products/` - Crear nuevo producto (con imagen opcional)
+    - **retrieve**: `GET /api/products/{id}/` - Obtener detalles
+    - **update**: `PUT /api/products/{id}/` - Actualizar producto
+    - **partial_update**: `PATCH /api/products/{id}/` - Actualización parcial
+    - **destroy**: `DELETE /api/products/{id}/` - Eliminar producto
+    - **by_sku**: `GET /api/products/sku/{sku}/` - Buscar por SKU exacto
+    - **search**: `GET /api/products/search/?query=term` - Búsqueda general
+    - **update_stock**: `POST /api/products/{id}/update-stock/` - Actualizar stock
 
     ## Parámetros de filtrado:
 
     - `category`: Filtrar por categoría (ej: `?category=Bebida`)
-    - `available`: Solo artículos disponibles (ej: `?available=true`)
+    - `available`: Solo productos con stock (ej: `?available=true`)
     - `search`: Búsqueda en nombre, descripción y SKU (ej: `?search=agua`)
 
-    ## Crear Item con Imagen:
+    ## Crear Producto con Imagen:
 
     En Swagger: Selecciona un archivo en el campo "image"
     Con cURL: `curl -F "image=@archivo.jpg" ...`
@@ -185,45 +174,45 @@ class TrolleyItemViewSet(viewsets.ModelViewSet):
 
     Formatos soportados: JPG, PNG, GIF, WebP, BMP, TIFF
     """
-    queryset = TrolleyItem.objects.all()
-    serializer_class = TrolleyItemSerializer
+    queryset = Product.objects.all()
+    serializer_class = ProductSerializer
     parser_classes = (MultiPartParser, FormParser)
 
     def get_queryset(self):
-        """Filtrar artículos según parámetros de búsqueda"""
-        queryset = TrolleyItem.objects.all()
+        """Filtrar productos según parámetros de búsqueda"""
+        queryset = Product.objects.all()
 
         # Filtrar por categoría
         category = self.request.query_params.get('category')
         if category:
             queryset = queryset.filter(category__icontains=category)
 
-        # Filtrar por disponibilidad (cantidad > 0)
+        # Filtrar por disponibilidad (stock > 0)
         available = self.request.query_params.get('available')
         if available and available.lower() == 'true':
-            queryset = queryset.filter(quantity__gt=0)
+            queryset = queryset.filter(stock_quantity__gt=0)
 
         # Búsqueda general por nombre o descripción
         search = self.request.query_params.get('search')
         if search:
             queryset = queryset.filter(
-                models.Q(name__icontains=search) |
-                models.Q(description__icontains=search) |
-                models.Q(sku__icontains=search)
+                Q(name__icontains=search) |
+                Q(description__icontains=search) |
+                Q(sku__icontains=search)
             )
 
         return queryset
 
     @action(detail=False, methods=['get'], url_path='sku/(?P<sku>[^/.]+)')
     def by_sku(self, request, sku=None):
-        """Obtener un artículo por su SKU"""
-        item = get_object_or_404(TrolleyItem, sku=sku)
-        serializer = self.get_serializer(item)
+        """Obtener un producto por su SKU"""
+        product = get_object_or_404(Product, sku=sku)
+        serializer = self.get_serializer(product)
         return Response(serializer.data)
 
     @action(detail=False, methods=['get'], url_path='search')
-    def search_items(self, request):
-        """Buscar artículos por nombre, descripción o categoría"""
+    def search(self, request):
+        """Buscar productos por nombre, descripción o categoría"""
         queryset = self.get_queryset()
         serializer = self.get_serializer(queryset, many=True)
         return Response({
@@ -231,68 +220,245 @@ class TrolleyItemViewSet(viewsets.ModelViewSet):
             'results': serializer.data
         })
 
-    @action(detail=True, methods=['post'], url_path='update-quantity')
-    def update_quantity(self, request, pk=None):
-        """Actualizar la cantidad de un artículo"""
-        item = self.get_object()
-        new_quantity = request.data.get('quantity')
+    @action(detail=True, methods=['post'], url_path='update-stock')
+    def update_stock(self, request, pk=None):
+        """Actualizar el stock de un producto"""
+        product = self.get_object()
+        new_stock = request.data.get('stock_quantity')
 
-        if new_quantity is None:
+        if new_stock is None:
             return Response(
-                {'error': 'quantity es requerido'},
+                {'error': 'stock_quantity es requerido'},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
         try:
-            item.quantity = int(new_quantity)
-            if item.quantity < 0:
+            product.stock_quantity = int(new_stock)
+            if product.stock_quantity < 0:
                 return Response(
-                    {'error': 'La cantidad no puede ser negativa'},
+                    {'error': 'El stock no puede ser negativo'},
                     status=status.HTTP_400_BAD_REQUEST
                 )
-            item.save()
-            serializer = self.get_serializer(item)
+            product.save()
+            serializer = self.get_serializer(product)
             return Response(serializer.data)
         except ValueError:
             return Response(
-                {'error': 'quantity debe ser un número entero'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-
-    @action(detail=True, methods=['post'], url_path='decrease-quantity')
-    def decrease_quantity(self, request, pk=None):
-        """Disminuir la cantidad de un artículo"""
-        item = self.get_object()
-        amount = request.data.get('amount', 1)
-
-        try:
-            amount = int(amount)
-            if amount < 0:
-                return Response(
-                    {'error': 'El monto debe ser positivo'},
-                    status=status.HTTP_400_BAD_REQUEST
-                )
-
-            if item.quantity < amount:
-                return Response(
-                    {'error': f'No hay suficiente cantidad. Disponible: {item.quantity}'},
-                    status=status.HTTP_400_BAD_REQUEST
-                )
-
-            item.quantity -= amount
-            item.save()
-            serializer = self.get_serializer(item)
-            return Response(serializer.data)
-        except ValueError:
-            return Response(
-                {'error': 'amount debe ser un número entero'},
+                {'error': 'stock_quantity debe ser un número entero'},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
 
-# Importar Q y models para las búsquedas
-from django.db.models import Q
-from django.db import models
+class TrolleyDrawerViewSet(viewsets.ModelViewSet):
+    """
+    API para gestionar drawers de trolleys.
+
+    Endpoints disponibles:
+    - GET /api/drawers/ - Listar todos los drawers
+    - POST /api/drawers/ - Crear un nuevo drawer
+    - GET /api/drawers/{id}/ - Obtener detalles de un drawer
+    - PUT /api/drawers/{id}/ - Actualizar un drawer
+    - DELETE /api/drawers/{id}/ - Eliminar un drawer
+    - GET /api/drawers/by-id/{drawer_id}/ - Obtener drawer por drawer_id (ej: DRW_013)
+    - GET /api/drawers/{id}/sensor-data/ - Obtener lecturas de sensores de este drawer
+    """
+    queryset = TrolleyDrawer.objects.select_related('trolley', 'level')
+    serializer_class = TrolleyDrawerSerializer
+
+    @action(detail=False, methods=['get'], url_path='by-id/(?P<drawer_id>[^/.]+)')
+    def by_drawer_id(self, request, drawer_id=None):
+        """Obtener un drawer por su drawer_id (ej: DRW_013)"""
+        drawer = get_object_or_404(TrolleyDrawer, drawer_id=drawer_id)
+        serializer = self.get_serializer(drawer)
+        return Response(serializer.data)
+
+    @action(detail=True, methods=['get'], url_path='sensor-data')
+    def get_sensor_data(self, request, pk=None):
+        """Obtener todas las lecturas de sensores de este drawer"""
+        drawer = self.get_object()
+        sensor_data = drawer.sensor_data.all().order_by('-timestamp')
+
+        # Permitir filtrado por alert_flag
+        alert_flag = request.query_params.get('alert_flag')
+        if alert_flag:
+            sensor_data = sensor_data.filter(alert_flag=alert_flag)
+
+        serializer = SensorDataSerializer(sensor_data, many=True)
+        return Response({
+            'drawer_id': drawer.drawer_id,
+            'trolley_name': drawer.trolley.name,
+            'count': sensor_data.count(),
+            'results': serializer.data
+        })
+
+
+class SpecificationViewSet(viewsets.ModelViewSet):
+    """
+    API para gestionar especificaciones (planes de carga).
+
+    Las especificaciones representan el plan detallado de qué productos
+    deben ir en cada drawer de un trolley para un vuelo o servicio específico.
+
+    Endpoints disponibles:
+    - GET /api/specifications/ - Listar especificaciones
+    - POST /api/specifications/ - Crear nueva especificación
+    - GET /api/specifications/{id}/ - Obtener detalles
+    - PUT /api/specifications/{id}/ - Actualizar
+    - PATCH /api/specifications/{id}/ - Actualización parcial
+    - DELETE /api/specifications/{id}/ - Eliminar
+    - GET /api/specifications/{id}/items/ - Obtener items de la especificación
+    - POST /api/specifications/{id}/items/ - Agregar item a la especificación
+    """
+    queryset = Specification.objects.prefetch_related('items__product', 'items__drawer')
+
+    def get_serializer_class(self):
+        """Retorna el serializer apropriado según la acción"""
+        if self.action == 'retrieve':
+            return SpecificationDetailSerializer
+        return SpecificationSerializer
+
+    @action(detail=True, methods=['get'], url_path='items')
+    def get_items(self, request, pk=None):
+        """Obtener todos los items de una especificación"""
+        specification = self.get_object()
+        items = specification.items.all()
+        serializer = SpecificationItemSerializer(items, many=True)
+        return Response(serializer.data)
+
+    @action(detail=True, methods=['post'], url_path='items')
+    def add_item(self, request, pk=None):
+        """Agregar un nuevo item a una especificación"""
+        specification = self.get_object()
+        data = request.data.copy()
+        data['specification'] = specification.id
+        serializer = SpecificationItemSerializer(data=data)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+class SpecificationItemViewSet(viewsets.ModelViewSet):
+    """
+    API para gestionar items de especificación.
+
+    Los items de especificación conectan un producto específico con un drawer
+    en una especificación determinada, incluyendo la cantidad requerida.
+
+    Endpoints disponibles:
+    - GET /api/specification-items/ - Listar todos los items
+    - POST /api/specification-items/ - Crear nuevo item
+    - GET /api/specification-items/{id}/ - Obtener detalles
+    - PUT /api/specification-items/{id}/ - Actualizar
+    - DELETE /api/specification-items/{id}/ - Eliminar
+    """
+    queryset = SpecificationItem.objects.select_related(
+        'specification', 'product', 'drawer'
+    )
+    serializer_class = SpecificationItemSerializer
+
+
+class SensorDataViewSet(viewsets.ModelViewSet):
+    """
+    API para gestionar datos de sensores en tiempo real.
+
+    Endpoints disponibles:
+    - GET /api/sensor-data/ - Listar todos los datos de sensores
+    - POST /api/sensor-data/ - Crear un nuevo registro de sensor
+    - GET /api/sensor-data/{id}/ - Obtener detalles de un registro
+    - DELETE /api/sensor-data/{id}/ - Eliminar un registro
+    - GET /api/sensor-data/by-drawer/{drawer_id}/ - Obtener sensores por drawer_id
+    - GET /api/sensor-data/by-flight/{flight_number}/ - Obtener sensores por vuelo
+    - GET /api/sensor-data/alerts/ - Obtener solo las alertas
+
+    ## Parámetros de filtrado:
+
+    - `alert_flag`: Filtrar por OK o Alert (ej: ?alert_flag=Alert)
+    - `flight_number`: Filtrar por vuelo (ej: ?flight_number=QR117)
+    - `sensor_type`: Filtrar por tipo de sensor (ej: ?sensor_type=camera)
+    """
+    queryset = SensorData.objects.select_related('drawer__trolley').order_by('-timestamp')
+    serializer_class = SensorDataSerializer
+
+    def get_queryset(self):
+        """Filtrar sensores según parámetros de query"""
+        queryset = SensorData.objects.select_related('drawer__trolley').order_by('-timestamp')
+
+        # Filtrar por alert_flag
+        alert_flag = self.request.query_params.get('alert_flag')
+        if alert_flag:
+            queryset = queryset.filter(alert_flag=alert_flag)
+
+        # Filtrar por flight_number
+        flight_number = self.request.query_params.get('flight_number')
+        if flight_number:
+            queryset = queryset.filter(flight_number=flight_number)
+
+        # Filtrar por sensor_type
+        sensor_type = self.request.query_params.get('sensor_type')
+        if sensor_type:
+            queryset = queryset.filter(sensor_type=sensor_type)
+
+        # Filtrar por drawer_id
+        drawer_id = self.request.query_params.get('drawer_id')
+        if drawer_id:
+            queryset = queryset.filter(drawer__drawer_id=drawer_id)
+
+        return queryset
+
+    @action(detail=False, methods=['get'], url_path='by-drawer/(?P<drawer_id>[^/.]+)')
+    def by_drawer(self, request, drawer_id=None):
+        """Obtener sensores por drawer_id"""
+        sensor_data = SensorData.objects.filter(
+            drawer__drawer_id=drawer_id
+        ).select_related('drawer__trolley').order_by('-timestamp')
+
+        if not sensor_data.exists():
+            return Response(
+                {'detail': f'No hay datos de sensores para el drawer {drawer_id}'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        serializer = self.get_serializer(sensor_data, many=True)
+        return Response({
+            'drawer_id': drawer_id,
+            'count': sensor_data.count(),
+            'results': serializer.data
+        })
+
+    @action(detail=False, methods=['get'], url_path='by-flight/(?P<flight_number>[^/.]+)')
+    def by_flight(self, request, flight_number=None):
+        """Obtener sensores por flight_number"""
+        sensor_data = SensorData.objects.filter(
+            flight_number=flight_number
+        ).select_related('drawer__trolley').order_by('-timestamp')
+
+        if not sensor_data.exists():
+            return Response(
+                {'detail': f'No hay datos de sensores para el vuelo {flight_number}'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        serializer = self.get_serializer(sensor_data, many=True)
+        return Response({
+            'flight_number': flight_number,
+            'count': sensor_data.count(),
+            'alerts': sensor_data.filter(alert_flag='Alert').count(),
+            'results': serializer.data
+        })
+
+    @action(detail=False, methods=['get'], url_path='alerts')
+    def get_alerts(self, request):
+        """Obtener solo los registros con alertas"""
+        sensor_data = SensorData.objects.filter(
+            alert_flag='Alert'
+        ).select_related('drawer__trolley').order_by('-timestamp')
+
+        serializer = self.get_serializer(sensor_data, many=True)
+        return Response({
+            'total_alerts': sensor_data.count(),
+            'results': serializer.data
+        })
 
 
 class QRDataViewSet(viewsets.ModelViewSet):
