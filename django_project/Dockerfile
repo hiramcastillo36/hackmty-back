@@ -10,7 +10,7 @@ EXPOSE 8000
 
 ARG DEV=false
 RUN python -m venv /py && \
-    /py/bin/pip install --upgrade pip && \
+    /py/bin/pip install --upgrade pip setuptools packaging && \
     apk add --update --no-cache postgresql-client && \
     apk add --update --no-cache --virtual .tmp-build-deps \
         build-base postgresql-dev musl-dev && \
@@ -35,5 +35,5 @@ RUN chown -R django-user:django-user /app
 
 USER django-user
 
-# Run the application
-CMD ["python", "manage.py", "runserver", "0.0.0.0:8000"]
+# Run the application with Daphne (supports WebSockets)
+CMD ["daphne", "-b", "0.0.0.0", "-p", "8000", "config.asgi:application"]

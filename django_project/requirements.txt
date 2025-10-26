@@ -8,3 +8,7 @@ drf-spectacular==0.26.5
 django-storages==1.14.2
 boto3==1.28.85
 azure-storage-blob==12.18.3
+channels==4.0.0
+channels-redis==4.1.0
+daphne==4.1.1
+django-cors-headers>=4.5.0,<4.6

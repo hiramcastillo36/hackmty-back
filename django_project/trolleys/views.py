@@ -5,13 +5,14 @@ from rest_framework.parsers import MultiPartParser, FormParser
 from django.shortcuts import get_object_or_404
 from drf_spectacular.utils import extend_schema, OpenApiRequest
 
-from .models import Trolley, TrolleyLevel, TrolleyItem
+from .models import Trolley, TrolleyLevel, TrolleyItem, QRData
 from .serializers import (
     TrolleyListSerializer,
     TrolleyDetailSerializer,
     TrolleyCreateUpdateSerializer,
     TrolleyLevelSerializer,
     TrolleyItemSerializer,
+    QRDataSerializer,
 )
 
 
@@ -292,3 +293,42 @@ class TrolleyItemViewSet(viewsets.ModelViewSet):
 # Importar Q y models para las búsquedas
 from django.db.models import Q
 from django.db import models
+
+
+class QRDataViewSet(viewsets.ModelViewSet):
+    """
+    API para gestionar datos leídos desde QR.
+
+    Endpoints disponibles:
+    - GET /api/qr-data/ - Listar todos los datos QR (últimos primero)
+    - POST /api/qr-data/ - Crear un nuevo registro QR
+    - GET /api/qr-data/{id}/ - Obtener detalles de un registro QR
+    - DELETE /api/qr-data/{id}/ - Eliminar un registro QR
+    - GET /api/qr-data/latest/ - Obtener el último registro QR leído
+
+    ## Crear QR Data:
+
+    ```
+    POST /api/qr-data/
+    {
+        "station_id": "PK02",
+        "flight_number": "QR117",
+        "customer_name": "Qatar Airways",
+        "drawer_id": "DRW_013"
+    }
+    ```
+    """
+    queryset = QRData.objects.all()
+    serializer_class = QRDataSerializer
+
+    @action(detail=False, methods=['get'], url_path='latest')
+    def get_latest(self, request):
+        """Obtener el último registro QR leído"""
+        latest_qr = QRData.objects.first()
+        if latest_qr:
+            serializer = self.get_serializer(latest_qr)
+            return Response(serializer.data)
+        return Response(
+            {'detail': 'No hay datos QR registrados'},
+            status=status.HTTP_404_NOT_FOUND
+        )

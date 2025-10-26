@@ -90,3 +90,38 @@ class TrolleyItem(models.Model):
 
     def __str__(self):
         return f"{self.name} (SKU: {self.sku})"
+
+
+class QRData(models.Model):
+    """Modelo para datos leídos desde QR"""
+    station_id = models.CharField(
+        max_length=255,
+        help_text="ID de la estación"
+    )
+    flight_number = models.CharField(
+        max_length=255,
+        help_text="Número de vuelo"
+    )
+    customer_name = models.CharField(
+        max_length=255,
+        help_text="Nombre del cliente/aerolínea"
+    )
+    drawer_id = models.CharField(
+        max_length=255,
+        help_text="ID del drawer/gaveta"
+    )
+    trolleys = models.ManyToManyField(
+        Trolley,
+        related_name='flights',
+        help_text="Trolleys asignados a este vuelo"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        verbose_name = 'Datos QR'
+        verbose_name_plural = 'Datos QR'
+
+    def __str__(self):
+        return f"QR - {self.flight_number} - {self.station_id}"

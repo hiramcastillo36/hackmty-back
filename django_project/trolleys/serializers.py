@@ -2,7 +2,7 @@ from django.db import models
 from rest_framework import serializers
 from drf_spectacular.utils import extend_schema_field
 from drf_spectacular.types import OpenApiTypes
-from .models import Trolley, TrolleyLevel, TrolleyItem
+from .models import Trolley, TrolleyLevel, TrolleyItem, QRData
 
 
 class TrolleyItemSerializer(serializers.ModelSerializer):
@@ -131,5 +131,32 @@ class TrolleyCreateUpdateSerializer(serializers.ModelSerializer):
             'airline',
         ]
 
-    
+
+class QRDataSerializer(serializers.ModelSerializer):
+    """Serializer para datos del QR"""
+    trolleys = TrolleyListSerializer(many=True, read_only=True)
+    trolley_ids = serializers.PrimaryKeyRelatedField(
+        queryset=Trolley.objects.all(),
+        many=True,
+        write_only=True,
+        required=False,
+        source='trolleys'
+    )
+
+    class Meta:
+        model = QRData
+        fields = [
+            'id',
+            'station_id',
+            'flight_number',
+            'customer_name',
+            'drawer_id',
+            'trolleys',
+            'trolley_ids',
+            'created_at',
+            'updated_at',
+        ]
+        read_only_fields = ['created_at', 'updated_at', 'id', 'trolleys']
+
+
 
