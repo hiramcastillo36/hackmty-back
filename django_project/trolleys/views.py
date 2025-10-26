@@ -124,6 +124,224 @@ class TrolleyViewSet(viewsets.ModelViewSet):
 
         return Response(stats)
 
+    @extend_schema(
+        summary="Obtener contenido REQUERIDO del trolley",
+        description="Obtiene todos los productos y cantidades que DEBE llevar este trolley según su especificación",
+        parameters=[
+            {
+                'name': 'spec_id',
+                'in': 'query',
+                'description': 'ID de especificación (opcional)',
+                'schema': {'type': 'string'}
+            }
+        ]
+    )
+    @action(detail=True, methods=['get'], url_path='required-contents')
+    def get_required_contents(self, request, pk=None):
+        """
+        Obtener lo que DEBE llevar el trolley según la especificación.
+
+        Devuelve todos los productos y cantidades que debe llevar este trolley
+        basado en su especificación asociada.
+
+        Query params:
+        - spec_id: Filtrar por especificación específica (opcional)
+        """
+        trolley = self.get_object()
+        spec_id = request.query_params.get('spec_id')
+
+        # Si se proporciona un spec_id, filtrar por eso
+        if spec_id:
+            specifications = Specification.objects.filter(
+                spec_id=spec_id,
+                trolley_template=trolley
+            )
+        else:
+            # Obtener todas las especificaciones donde este trolley es el template
+            specifications = trolley.specifications.all() if hasattr(trolley, 'specifications') else Specification.objects.filter(trolley_template=trolley)
+
+        if not specifications.exists():
+            return Response({
+                'trolley_id': trolley.id,
+                'trolley_name': trolley.name,
+                'message': 'No hay especificaciones asociadas a este trolley',
+                'specifications': []
+            })
+
+        specs_data = []
+        total_items = 0
+        total_quantity = 0
+
+        for spec in specifications:
+            items = spec.items.select_related('product', 'drawer', 'drawer__level').all()
+
+            items_by_drawer = {}
+            items_by_level = {}
+            spec_total_qty = 0
+
+            for item in items:
+                drawer_id = item.drawer.drawer_id
+                level_number = item.drawer.level.level_number
+                level_display = item.drawer.level.get_level_number_display()
+
+                # Agrupar por drawer
+                if drawer_id not in items_by_drawer:
+                    items_by_drawer[drawer_id] = {
+                        'drawer_id': drawer_id,
+                        'drawer_level': level_display,
+                        'products': []
+                    }
+
+                # Agrupar por nivel
+                if level_number not in items_by_level:
+                    items_by_level[level_number] = {
+                        'level_number': level_number,
+                        'level_display': level_display,
+                        'products': []
+                    }
+
+                product_data = {
+                    'product_id': item.product.id,
+                    'product_name': item.product.name,
+                    'sku': item.product.sku,
+                    'category': item.product.category,
+                    'required_quantity': item.required_quantity,
+                    'price': float(item.product.price) if item.product.price else None,
+                    'image': item.product.image_url
+                }
+                items_by_drawer[drawer_id]['products'].append(product_data)
+                items_by_level[level_number]['products'].append(product_data)
+                spec_total_qty += item.required_quantity
+                total_quantity += item.required_quantity
+
+            total_items += len(items)
+
+            # Ordenar niveles por número
+            levels_sorted = sorted(items_by_level.values(), key=lambda x: x['level_number'])
+
+            specs_data.append({
+                'spec_id': spec.spec_id,
+                'spec_name': spec.name,
+                'spec_description': spec.description,
+                'total_items_count': len(items),
+                'total_quantity': spec_total_qty,
+                'by_level': levels_sorted,
+                'by_drawer': list(items_by_drawer.values()),
+            })
+
+        return Response({
+            'trolley_id': trolley.id,
+            'trolley_name': trolley.name,
+            'airline': trolley.airline,
+            'total_specs': len(specs_data),
+            'total_items': total_items,
+            'total_quantity': total_quantity,
+            'specifications': specs_data
+        })
+
+    @extend_schema(
+        summary="Obtener contenido ACTUAL del trolley",
+        description="Obtiene los productos detectados en cada drawer basado en las lecturas de sensores más recientes",
+        parameters=[
+            {
+                'name': 'flight_number',
+                'in': 'query',
+                'description': 'Número de vuelo (opcional)',
+                'schema': {'type': 'string'}
+            },
+            {
+                'name': 'alert_flag',
+                'in': 'query',
+                'description': 'Filtrar por alertas: OK o Alert (opcional)',
+                'schema': {'type': 'string', 'enum': ['OK', 'Alert']}
+            }
+        ]
+    )
+    @action(detail=True, methods=['get'], url_path='current-contents')
+    def get_current_contents(self, request, pk=None):
+        """
+        Obtener lo que ACTUALMENTE tiene el trolley según los sensores.
+
+        Devuelve los productos detectados en cada drawer basado en las lecturas
+        más recientes de los sensores.
+
+        Query params:
+        - flight_number: Filtrar por vuelo específico (opcional)
+        - alert_flag: Filtrar solo por alertas (OK o Alert) (opcional)
+        """
+        trolley = self.get_object()
+        flight_number = request.query_params.get('flight_number')
+        alert_flag = request.query_params.get('alert_flag')
+
+        drawers = trolley.drawers.all()
+
+        if not drawers.exists():
+            return Response({
+                'trolley_id': trolley.id,
+                'trolley_name': trolley.name,
+                'message': 'Este trolley no tiene drawers',
+                'drawers': []
+            })
+
+        drawers_data = []
+        total_sensor_readings = 0
+        total_alerts = 0
+
+        for drawer in drawers:
+            sensor_data_qs = drawer.sensor_data.all().order_by('-timestamp')
+
+            # Aplicar filtros
+            if flight_number:
+                sensor_data_qs = sensor_data_qs.filter(flight_number=flight_number)
+
+            if alert_flag:
+                sensor_data_qs = sensor_data_qs.filter(alert_flag=alert_flag)
+
+            if sensor_data_qs.exists():
+                # Agrupar por tipo de sensor y obtener el más reciente
+                latest_readings = {}
+                for sensor in sensor_data_qs:
+                    key = (sensor.sensor_type, sensor.spec_id)
+                    if key not in latest_readings:
+                        latest_readings[key] = sensor
+
+                readings = []
+                for sensor in latest_readings.values():
+                    readings.append({
+                        'stream_id': sensor.stream_id,
+                        'timestamp': sensor.timestamp,
+                        'sensor_type': sensor.sensor_type,
+                        'expected_value': sensor.expected_value,
+                        'detected_value': sensor.detected_value,
+                        'deviation_score': sensor.deviation_score,
+                        'alert_flag': sensor.alert_flag,
+                        'flight_number': sensor.flight_number,
+                        'spec_id': sensor.spec_id,
+                    })
+
+                drawer_alerts = sum(1 for r in readings if r['alert_flag'] == 'Alert')
+                total_sensor_readings += len(readings)
+                total_alerts += drawer_alerts
+
+                drawers_data.append({
+                    'drawer_id': drawer.drawer_id,
+                    'level': drawer.level.get_level_number_display(),
+                    'readings_count': len(readings),
+                    'alerts': drawer_alerts,
+                    'sensor_readings': readings,
+                })
+
+        return Response({
+            'trolley_id': trolley.id,
+            'trolley_name': trolley.name,
+            'airline': trolley.airline,
+            'total_drawers': drawers.count(),
+            'drawers_with_data': len(drawers_data),
+            'total_sensor_readings': total_sensor_readings,
+            'total_alerts': total_alerts,
+            'drawers': drawers_data
+        })
+
 
 class TrolleyLevelViewSet(viewsets.ModelViewSet):
     """
@@ -151,7 +369,7 @@ class ProductViewSet(viewsets.ModelViewSet):
     ## Acciones disponibles:
 
     - **list**: `GET /api/products/` - Listar productos (con filtros)
-    - **create**: `POST /api/products/` - Crear nuevo producto (con imagen opcional)
+    - **create**: `POST /api/products/` - Crear nuevo producto
     - **retrieve**: `GET /api/products/{id}/` - Obtener detalles
     - **update**: `PUT /api/products/{id}/` - Actualizar producto
     - **partial_update**: `PATCH /api/products/{id}/` - Actualización parcial
@@ -166,17 +384,12 @@ class ProductViewSet(viewsets.ModelViewSet):
     - `available`: Solo productos con stock (ej: `?available=true`)
     - `search`: Búsqueda en nombre, descripción y SKU (ej: `?search=agua`)
 
-    ## Crear Producto con Imagen:
+    ## Crear Producto:
 
-    En Swagger: Selecciona un archivo en el campo "image"
-    Con cURL: `curl -F "image=@archivo.jpg" ...`
-    Con Python: `files={"image": open("archivo.jpg", "rb")}`
-
-    Formatos soportados: JPG, PNG, GIF, WebP, BMP, TIFF
+    Con cURL: `curl -X POST http://localhost:8000/api/products/ -H "Content-Type: application/json" -d '{"name": "...", "sku": "...", "image_url": "https://..."}'`
     """
     queryset = Product.objects.all()
     serializer_class = ProductSerializer
-    parser_classes = (MultiPartParser, FormParser)
 
     def get_queryset(self):
         """Filtrar productos según parámetros de búsqueda"""

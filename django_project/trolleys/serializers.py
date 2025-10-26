@@ -12,14 +12,8 @@ class ProductSerializer(serializers.ModelSerializer):
     """
     Serializer para productos del catálogo.
 
-    Permite crear y actualizar productos con imágenes.
+    Permite crear y actualizar productos con URL de imagen.
     """
-    # Especificar que 'image' es un archivo para Swagger
-    image = serializers.ImageField(
-        required=False,
-        allow_null=True,
-        help_text="Imagen del artículo (JPG, PNG, GIF, WebP, etc)"
-    )
 
     class Meta:
         model = Product
@@ -29,23 +23,13 @@ class ProductSerializer(serializers.ModelSerializer):
             'description',
             'sku',
             'stock_quantity',
-            'image',
+            'image_url',
             'price',
             'category',
             'created_at',
             'updated_at',
         ]
         read_only_fields = ['created_at', 'updated_at', 'id']
-
-    def to_representation(self, instance):
-        """Retornar URL completa de la imagen en respuestas"""
-        representation = super().to_representation(instance)
-        # Si hay imagen, asegurarse que la URL sea accesible
-        if representation['image']:
-            request = self.context.get('request')
-            if request and not representation['image'].startswith('http'):
-                representation['image'] = request.build_absolute_uri(representation['image'])
-        return representation
 
 
 class TrolleyLevelSerializer(serializers.ModelSerializer):
@@ -273,6 +257,38 @@ class SpecificationDetailSerializer(serializers.ModelSerializer):
         if obj.trolley_template:
             return TrolleyDetailSerializer(obj.trolley_template).data
         return None
+
+
+class TrolleyRequiredContentsSerializer(serializers.Serializer):
+    """
+    Serializer para la respuesta de lo que DEBE llevar un trolley.
+
+    Estructura de respuesta que agrupa los productos requeridos por especificación
+    y luego por drawer.
+    """
+    trolley_id = serializers.IntegerField()
+    trolley_name = serializers.CharField()
+    airline = serializers.CharField()
+    total_specs = serializers.IntegerField()
+    total_items = serializers.IntegerField()
+    total_quantity = serializers.IntegerField()
+    specifications = serializers.ListField()
+
+
+class TrolleyCurrentContentsSerializer(serializers.Serializer):
+    """
+    Serializer para la respuesta de lo que ACTUALMENTE tiene un trolley.
+
+    Estructura de respuesta basada en lecturas de sensores más recientes.
+    """
+    trolley_id = serializers.IntegerField()
+    trolley_name = serializers.CharField()
+    airline = serializers.CharField()
+    total_drawers = serializers.IntegerField()
+    drawers_with_data = serializers.IntegerField()
+    total_sensor_readings = serializers.IntegerField()
+    total_alerts = serializers.IntegerField()
+    drawers = serializers.ListField()
 
 
 

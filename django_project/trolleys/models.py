@@ -84,11 +84,10 @@ class Product(models.Model):
         default=0,
         help_text="Cantidad total de unidades en inventario"
     )
-    image = models.ImageField(
-        upload_to='products/%Y/%m/%d/',
+    image_url = models.URLField(
         null=True,
         blank=True,
-        help_text="Imagen del artículo"
+        help_text="URL de la imagen del artículo"
     )
     price = models.DecimalField(
         max_digits=10,
